@@ -102,6 +102,12 @@ class Installer < PhusionPassenger::AbstractInstaller
 		if PhusionPassenger.originally_packaged?
 			compile_passenger_support_files || exit(1)
 		end
+		if @websockets
+			websocket_module_path = download_and_extract_websocket_module
+			apply_websocket_patch websocket_module_path, nginx_source_dir
+			extra_nginx_configure_flags ||= ""
+			extra_nginx_configure_flags << " --add-module=#{websocket_module_path}"
+		end
 		if install_nginx(nginx_source_dir, nginx_prefix, extra_nginx_configure_flags)
 			if nginx_config_already_exists_before_installing || !locate_nginx_config_file(nginx_prefix)
 				show_passenger_config_snippets(nginx_prefix)
@@ -223,6 +229,41 @@ private
 			end
 		else
 			return nil
+		end
+	rescue Interrupt
+		exit 2
+	end
+
+	def download_and_extract_websocket_module
+		new_screen
+		puts "<banner>Downloading nginx_tcp_proxy_module...</banner>"
+
+		url = "http://github.com/yaoweibin/nginx_tcp_proxy_module/tarball/master"
+		dirname = "nginx_tcp_proxy_module"
+		tarball = "#{@working_dir}/nginx_tcp_proxy_module.tar.gz"
+
+		if download(url, tarball)
+			Dir.chdir(@working_dir) do
+				puts "<banner>Extracting nginx_tcp_proxy_module source tarball...</banner>"
+				if sh("tar", "xzvf", tarball)
+					FileUtils.mkdir_p(dirname)
+					sh("mv #{@working_dir}/yaoweibin-#{dirname}-*/* #{@working_dir}/#{dirname}")
+					return "#{@working_dir}/#{dirname}"
+				else
+					exit 2
+				end
+			end
+		else
+			return nil
+		end
+	rescue Interrupt
+		exit 2
+	end
+
+	def apply_websocket_patch(path, source)
+		puts "<banner>Applying websocket patch...</banner>"
+		Dir.chdir(source) do
+			sh("patch -p1 < #{path}/tcp.patch")
 		end
 	rescue Interrupt
 		exit 2
@@ -476,6 +517,9 @@ parser = OptionParser.new do |opts|
 	        "#{' ' * 37}additional flags but do not want this\n" <<
 	        "#{' ' * 37}installer to ask interactively either.") do |flags|
 		options[:extra_configure_flags] = flags
+	end
+	opts.on("--websockets", "Compile Nginx with support for websocket passthrough.") do
+		options[:websockets] = true
 	end
 end
 begin
