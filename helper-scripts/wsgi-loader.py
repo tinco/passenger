@@ -43,7 +43,7 @@ def handshake_and_read_startup_request():
 	print("!> I have control 1.0")
 	if readline() != "You have control 1.0\n":
 		abort("Invalid initialization header")
-	
+
 	line = readline()
 	while line != "\n":
 		result = re.split(': *', line.strip(), 2)
@@ -97,7 +97,7 @@ class RequestHandler:
 		self.server = server_socket
 		self.owner_pipe = owner_pipe
 		self.app = app
-	
+
 	def main_loop(self):
 		done = False
 		try:
@@ -123,16 +123,17 @@ class RequestHandler:
 					except Exception:
 						logging.exception("WSGI application raised an exception!")
 				finally:
-					try:
-						# Shutdown the socket like this just in case the app
-						# spawned a child process that keeps it open.
-						client.shutdown(socket.SHUT_WR)
-					except:
-						pass
-					try:
-						client.close()
-					except:
-						pass
+					if not env['wsgi.hijacked']:
+						try:
+							# Shutdown the socket like this just in case the app
+							# spawned a child process that keeps it open.
+							client.shutdown(socket.SHUT_WR)
+						except:
+							pass
+						try:
+							client.close()
+						except:
+							pass
 		except KeyboardInterrupt:
 			pass
 
@@ -142,7 +143,7 @@ class RequestHandler:
 			return self.server.accept()
 		else:
 			return (None, None)
-	
+
 	def parse_request(self, client):
 		buf = b''
 		while len(buf) < 4:
@@ -151,14 +152,14 @@ class RequestHandler:
 				return (None, None)
 			buf += tmp
 		header_size = struct.unpack('>I', buf)[0]
-		
+
 		buf = b''
 		while len(buf) < header_size:
 			tmp = client.recv(header_size - len(buf))
 			if len(tmp) == 0:
 				return (None, None)
 			buf += tmp
-		
+
 		headers = buf.split(b"\0")
 		headers.pop() # Remove trailing "\0"
 		env = {}
@@ -168,7 +169,7 @@ class RequestHandler:
 			i += 2
 
 		return (env, client)
-	
+
 	if hasattr(socket, '_fileobject'):
 		def wrap_input_socket(self, sock):
 			return socket._fileobject(sock, 'rb', 512)
@@ -197,7 +198,15 @@ class RequestHandler:
 
 		headers_set = []
 		headers_sent = []
-		
+
+		def hijack():
+			env['wsgi.hijack_input']  = input_stream
+			env['wsgi.hijack_output'] = output_stream
+			env['hijacked']           = True
+
+		env['hijacked']    = False
+		env['wsgi.hijack'] = hijack
+
 		def write(data):
 			try:
 				if not headers_set:
@@ -216,7 +225,7 @@ class RequestHandler:
 				e = sys.exc_info()[1]
 				setattr(e, 'passenger', True)
 				raise e
-		
+
 		def start_response(status, response_headers, exc_info = None):
 			if exc_info:
 				try:
@@ -228,10 +237,10 @@ class RequestHandler:
 					exc_info = None
 			elif headers_set:
 				raise AssertionError("Headers already set!")
-			
+
 			headers_set[:] = [status, response_headers]
 			return write
-		
+
 		result = self.app(env, start_response)
 		try:
 			for data in result:
@@ -244,7 +253,7 @@ class RequestHandler:
 		finally:
 			if hasattr(result, 'close'):
 				result.close()
-	
+
 	def process_ping(self, env, input_stream, output_stream):
 		output_stream.sendall(b"pong")
 
